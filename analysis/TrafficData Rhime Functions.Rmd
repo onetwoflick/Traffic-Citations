@@ -1,0 +1,175 @@
+---
+title: "Traffic Data Rhime Functions"
+output: html_document
+date: "2024-01-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This notebook demonstrates how to clean traffic parking data, geocode the addresses using the US Census API, and plot the citations on a map of Manhattan by census tract.
+
+## 1. Environment Setup
+
+First, we load the required libraries. If you don't have these installed, you can install them using `install.packages()`.
+
+```{r load-libraries}
+library(tidyverse)
+library(sf)
+library(xml2)
+library(httr2)
+
+# Load custom helper functions
+source("../R/geocoding_helpers.R")
+```
+
+## 2. Load Spatial Boundaries
+
+We load the 2010 New York census tract shapefiles to build our map.
+
+```{r load-shapefiles}
+# Read in the NY Tracts shapefile
+ny_ct_shapes <- st_read("../data/raw/ny_2010_t_bound.shp")
+
+# Quick plot to verify boundaries
+ggplot() + 
+  geom_sf(data = ny_ct_shapes) +
+  theme_minimal() +
+  labs(title = "New York 2010 Census Tracts")
+```
+
+## 3. Data Processing and Geocoding
+
+Next, we load the parking citations data and prepare it for geocoding. 
+*Note: The following code block is set to `eval=FALSE` so it doesn't run every time you knit the notebook. Running the full batch geocoding takes a long time.*
+
+```{r batch-geocoding, eval=FALSE}
+# Read the raw parking citations CSV
+parking_csv <- "../data/raw/Parking_Fiscal_Year_2021.csv"
+df <- read.csv(parking_csv)
+
+# Create a full street address by combining House Number and Street Name
+df$street_address <- paste(df[, 24], df[, 25], sep = " ")
+
+# Use our helper function to batch geocode the addresses and save to data/processed
+batch_geocode_addresses(df, chunk_size = 10000, output_dir = "../data/processed")
+```
+
+### 3.1 Combine Geocoded Results
+
+After batch geocoding, we merge the chunk files into a single dataset.
+*Note: This is also set to `eval=FALSE` because the combined file has already been generated.*
+
+```{r combine-chunks, eval=FALSE}
+# Read the first chunk
+df_combined <- read.csv("../data/processed/Geocode_Result_Chunk_1.csv")
+names(df_combined) <- c("UniqueID", "Address", "Matched", "Exactmatch", "ReturnAddress", "X_Y", "RandomID", "RValue")
+
+# Loop through remaining chunks and row-bind
+for(i in 2:19) {
+  file_name <- paste0("../data/processed/Geocode_Result_Chunk_", i, ".csv")
+  temp_df <- read.csv(file_name)
+  names(temp_df) <- c("UniqueID", "Address", "Matched", "Exactmatch", "ReturnAddress", "X_Y", "RandomID", "RValue")
+  df_combined <- rbind(df_combined, temp_df)
+}
+
+# Export combined dataframe
+write.csv(df_combined, "../data/processed/Combined_Geocode_Results.csv", row.names = FALSE)
+```
+
+## 4. Spatial Joins
+
+Now we load the combined geocoded results and convert them into spatial points so we can overlay them on the census tracts.
+
+```{r process-coordinates}
+# Read the combined geocoded results
+df <- read.csv("../data/processed/Combined_Geocode_Results.csv")
+
+# Filter rows with coordinates and split into latitude and longitude
+geocoded_aggregate_df <- df %>% 
+  filter(grepl(",", X_Y)) %>%  
+  separate_wider_delim(X_Y, delim = ",", names = c("latitude", "longitude"))
+
+# Convert to spatial object
+df_spatial_coords_df <- st_as_sf(geocoded_aggregate_df, 
+                                 coords = c("latitude", "longitude"), 
+                                 crs = 4269, 
+                                 agr = "constant")
+```
+
+### 4.1 Filter to Manhattan
+
+We'll focus our analysis on Manhattan (County FIPS code 061).
+
+```{r filter-manhattan}
+# Filter shapefile to Manhattan only
+manhattan_ct_shapes <- ny_ct_shapes %>% filter(COUNTYFP == "061")
+
+# Transform coordinates to match the shapefile CRS
+df_spatial_coords_df <- st_transform(df_spatial_coords_df, crs = st_crs(manhattan_ct_shapes))
+```
+
+### 4.2 Calculate Citations per Tract
+
+We intersect the citation coordinates with the census tracts to count how many citations occurred in each tract.
+
+```{r calculate-counts}
+# Count intersections
+inter <- st_intersects(manhattan_ct_shapes, df_spatial_coords_df)
+
+# Store the counts
+manhattan_ct_shapes$count <- lengths(inter)
+```
+
+## 5. Heatmap Visualization
+
+Finally, we plot a heatmap showing the density of traffic citations across Manhattan.
+
+```{r plot-heatmap}
+ggplot(manhattan_ct_shapes) + 
+  geom_sf(aes(fill = count), color = "white", size = 0.1) +
+  scale_fill_viridis_c(option = "magma", trans = "log1p", breaks = c(0, 10, 100, 1000)) +
+  theme_minimal() +
+  labs(
+    title = "Traffic Citations in Manhattan",
+    subtitle = "By Census Tract",
+    fill = "Citations"
+  )
+```
+
+## 6. Optional: Demographic Relationships
+
+You can also use the Census API to download demographic data (e.g., age demographics) and see if they correlate with citation frequency.
+
+```{r load-census-api}
+# Ensure your census key is set
+# Sys.setenv(CENSUS_KEY="your_key_here")
+
+library(censusapi)
+
+# Fetch Population 18-24 by tract
+pdb_pub_ast <- getCensus(
+    name = "pdb/tract",
+    vintage = 2020, 
+    vars = c("Pop_18_24_CEN_2010", "Tract"),
+    region = "tract:*",
+    regionin = "state:36+county:061"
+)
+
+# Join demographic data to shapefile
+manhattan_pub_ast_shapes <- left_join(manhattan_ct_shapes, pdb_pub_ast, by = join_by(TRACTCE == Tract))
+
+# Plot the demographic variable
+ggplot() + 
+  geom_sf(data = manhattan_pub_ast_shapes, aes(fill = Pop_18_24_CEN_2010)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Population Aged 18-24 in Manhattan")
+
+# Check relationship
+lm_model <- lm(count ~ Pop_18_24_CEN_2010, data = manhattan_pub_ast_shapes)
+summary(lm_model)
+```

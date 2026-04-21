@@ -1,0 +1,186 @@
+---
+title: "Correlation and Scatterplots"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: pdf_document
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.align = "center") 
+```
+
+# Introduction
+
+In today's class, we'll dive deep into scatterplots and interpret a new summary statistic, the *correlation coefficient*. We will explore the relationship between public assistance income and the prevalence of mobile homes in New York County, NY, using data from the American Community Survey (ACS) provided through the US Census API.
+
+## 1. Setup Environment
+
+Run this code chunk to load the packages you'll need:
+
+```{r load-libraries}
+library(tidyverse)
+library(censusapi)
+
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+First, let's fetch the relevant data from the Census API:
+
+```{r fetch-data}
+pdb_pub_ast_mobile_homes <- getCensus(
+  name = "pdb/tract",
+  vintage = 2020, 
+  vars = c("PUB_ASST_INC_ACS_14_18", "Mobile_Homes_ACSMOE_14_18"),
+  region = "tract:*",
+  regionin = "state:36+county:061" # New York County, NY
+)
+```
+
+## 2. Basic Scatterplots
+
+Here is a scatterplot visualizing the relationship between public assistance income and the prevalence of mobile homes.
+
+```{r plot-mobile-homes}
+pdb_pub_ast_mobile_homes %>%
+  ggplot(aes(x = PUB_ASST_INC_ACS_14_18, y = Mobile_Homes_ACSMOE_14_18)) +
+  geom_point(alpha = 0.6)  +
+  theme_minimal() +
+  labs(
+    title = "Public Assistance vs. Mobile Homes",
+    x = "Public Assistance Income",
+    y = "Prevalence of Mobile Homes"
+  )
+```
+
+### Discussion Questions
+- What does a dot represent in this scatterplot?
+- What are all the variables represented in this graphic? How are they manifested in the plot?
+- Does it look like there is any relationship between the variables you see?
+
+---
+
+# Scatterplots for Pairs of Numerical Variables
+
+Whenever we have a pair of numerical variables, we can construct a scatterplot. For example, we can visualize any potential correlation between poverty levels and the availability of renter-occupied housing units.
+
+```{r fetch-poverty-rental}
+data_poverty_rental <- getCensus(
+  name = "pdb/tract",
+  vintage = 2020, 
+  vars = c("Prs_Blw_Pov_Lev_ACS_14_18", "Renter_Occp_HU_ACS_14_18"),
+  region = "tract:*",
+  regionin = "state:36+county:061"
+)
+
+data_poverty_rental %>%
+  ggplot(aes(x = Prs_Blw_Pov_Lev_ACS_14_18, y = Renter_Occp_HU_ACS_14_18)) +
+  geom_point(color = "darkgreen", alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "Poverty Level vs. Renter-Occupied Housing Units",
+    x = "People Below Poverty Level", 
+    y = "Renter-Occupied Housing Units"
+  )
+```
+
+**Question:** As the number of people living below the poverty level increases, what happens to the number of renter-occupied housing units?
+
+### Health Insurance vs. Poverty
+
+Let's analyze the relationship between the number of people with one type of health insurance coverage and the number of persons below the poverty level.
+
+```{r fetch-health}
+data_health <- getCensus(
+  name = "pdb/tract",
+  vintage = 2020, 
+  vars = c("One_Health_Ins_ACS_14_18", "Prs_Blw_Pov_Lev_ACS_14_18"),
+  region = "tract:*",
+  regionin = "state:36+county:061" 
+)
+
+ggplot(data_health, aes(x = One_Health_Ins_ACS_14_18, y = Prs_Blw_Pov_Lev_ACS_14_18)) +
+  geom_point(color = "dodgerblue", alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "Health Insurance Coverage vs. Poverty Level",
+    x = "People with One Health Insurance", 
+    y = "People Below Poverty Level"
+  )
+```
+
+We can also calculate the mathematical correlation coefficient between these two variables:
+
+```{r calc-correlation, eval=FALSE}
+# data_health %>% summarize(correlation = cor(One_Health_Ins_ACS_14_18, Prs_Blw_Pov_Lev_ACS_14_18, use = "complete.obs"))
+```
+
+---
+
+# On Your Own
+
+### 1. Select Variables and Fetch Data
+Choose two numerical variables from the `pdb_variables` list that interest you, and fetch the data using `getCensus`.
+
+```{r fetch-custom, eval=FALSE}
+custom_data <- getCensus(
+  name = "pdb/tract",
+  vintage = 2020, 
+  vars = c("Variable1", "Variable2"), # Replace with your chosen variables
+  region = "tract:*",
+  regionin = "state:36+county:061" 
+)
+```
+
+### 2. Create a Scatterplot
+Create a scatterplot to visualize the relationship between your selected variables.
+
+```{r plot-custom, eval=FALSE}
+ggplot(custom_data, aes(x = Variable1, y = Variable2)) + 
+  geom_point(color = "purple") +
+  theme_minimal()
+```
+
+---
+
+# Interpreting a Regression Line
+
+Let's look at the relationship between poverty (`Prs_Blw_Pov_Lev_ACS_14_18`) and lack of computing devices (`Pop_NoCompDevic_ACS_14_18`).
+
+```{r fetch-tech}
+data_tech <- getCensus(
+  name = "pdb/tract",
+  vintage = 2020, 
+  vars = c("Prs_Blw_Pov_Lev_ACS_14_18", "Pop_NoCompDevic_ACS_14_18"),
+  region = "tract:*",
+  regionin = "state:36+county:061"
+)
+```
+
+### Create the Scatterplot with Regression Line
+
+```{r plot-tech}
+ggplot(data_tech, aes(x = Prs_Blw_Pov_Lev_ACS_14_18, y = Pop_NoCompDevic_ACS_14_18)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Economic Hardship vs. Technological Access",
+    x = "Population Below Poverty Level", 
+    y = "Population Without Computing Devices"
+  )
+```
+
+### Find the Equation of the Regression Line
+
+Calculate the linear model:
+
+```{r linear-model}
+lm_result <- lm(Pop_NoCompDevic_ACS_14_18 ~ Prs_Blw_Pov_Lev_ACS_14_18, data = data_tech)
+summary(lm_result)
+```
+
+**Interpretation:**
+A slope of ~0.434 suggests that for every additional person living below the poverty level, there is an associated increase of approximately 0.434 people without computing devices. This positive coefficient indicates a direct relationship: as poverty increases, so does the number of individuals lacking access to computing technology.

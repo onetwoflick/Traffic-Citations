@@ -1,0 +1,118 @@
+---
+title: "California Shapefile and Census Plotting"
+output: html_document
+date: "2023-06-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(sf)
+library(censusapi)
+
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+# Introduction
+
+This notebook demonstrates how to work with spatial data for California, specifically plotting Census block groups in San Francisco and joining them with data retrieved from the US Census API.
+
+## 1. Loading Shapefiles
+
+First, we load the shapefile for Census block groups in California. 
+
+```{r load-ca-shapes}
+# Load CA shapefile
+# Note: Ensure tl_rd22_06_bg.shp is located in the data/raw folder
+CA_shapes <- st_read("../data/raw/tl_rd22_06_bg.shp")
+
+# View this as a geodataframe
+# head(CA_shapes)
+```
+
+## 2. Making Basic Plots
+
+Plots in the `sf` package are straightforward.
+
+```{r plot-ca}
+# Basic plot of geometries
+plot(st_geometry(CA_shapes))
+```
+
+This can be annotated with colors. The following code chooses colors randomly.
+
+```{r colored-plot}
+plot(st_geometry(CA_shapes), col = sf.colors(12, categorical = TRUE), border = 'grey', axes = TRUE)
+```
+
+Notice that we can use `ggplot()` and `geom_sf()` as well, which is often preferred for more control over aesthetics.
+
+```{r ggplot-ca}
+ggplot() + 
+  geom_sf(data = CA_shapes) +
+  theme_minimal()
+```
+
+### Zooming into a Bounding Box
+
+With `ggplot()`, we can zoom in on part of the plot by defining the bounding box limits. For example, we can zoom into the San Francisco Bay Area. Notice the chunk missing from the top left of San Francisco! This is a national park, so there are no residential blocks.
+
+```{r zoom-sf}
+ggplot() + 
+  geom_sf(data = CA_shapes) +
+  coord_sf(xlim = c(-122.6, -122.2), ylim = c(37.6, 37.9)) +
+  theme_minimal() +
+  labs(title = "Zoomed: San Francisco Bay Area")
+```
+
+To make our life simpler going forward, let's only focus on San Francisco, which is county `075`.
+
+```{r filter-sf}
+SF_shapes <- CA_shapes %>% filter(COUNTYFP == "075")
+```
+
+
+# US Census API Integration
+
+Now let's bring in the US Census API for data from the American Community Survey. 
+First, ensure your API key is loaded via `Sys.setenv(CENSUS_KEY="your_key")`.
+
+## Fetching Demographic Variables
+
+For our purposes, we'll want extremely detailed data, at the level of census block groups. We are interested in the `NH_Blk_alone_CEN_2010` variable (Non-Hispanic Black alone count).
+
+```{r fetch-census-data}
+pdb_blk <- getCensus(
+    name = "pdb/blockgroup",
+    vintage = 2020, 
+    vars = c("NH_Blk_alone_CEN_2010", "Tract"),
+    region = "block group:*",
+    regionin = "state:06+county:075" # State 06 (CA), County 075 (SF)
+)
+
+head(pdb_blk)
+```
+
+## Joining to Geodataframe and Plotting
+
+Now we have to join this data to our original `SF_shapes` spatial data frame and plot it. We join on the variable `Tract` in the census data and `TRACTCE` in the spatial data.
+
+```{r join-data}
+SF_blk_shapes <- left_join(SF_shapes, pdb_blk, by = join_by(TRACTCE == Tract))
+```
+
+Now we can plot the demographic variable across San Francisco!
+
+```{r plot-demographics}
+ggplot() + 
+  geom_sf(data = SF_blk_shapes, aes(fill = NH_Blk_alone_CEN_2010)) +
+  coord_sf(xlim = c(-122.55, -122.35), ylim = c(37.7, 37.85)) +
+  scale_fill_viridis_c(option = "magma") +
+  theme_minimal() +
+  labs(
+    title = "Non-Hispanic Black Alone Population",
+    subtitle = "San Francisco Census Blocks (2010)",
+    fill = "Population"
+  )
+```

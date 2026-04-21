@@ -1,0 +1,135 @@
+---
+title: "Traffic Data and Map Plotting (NYC)"
+output: html_document
+date: "2024-02-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(sf)
+library(censusapi)
+
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+# Introduction
+
+This notebook demonstrates how to load New York State shapefiles, filter them down to Manhattan, and plot Census demographic data over those geographic boundaries using the `sf` package.
+
+## 1. Loading Shapefiles
+
+First, we load the shapefile for Census tracts in New York City. We can view it as a geodataframe.
+
+```{r load-shapefile}
+# Load New York City Census Tracts shapefile
+nyc_ct_shapes <- st_read("../data/raw/nyct2020wi.shp")
+
+# View the structure of the spatial dataframe (optional)
+# head(nyc_ct_shapes)
+```
+
+## 2. Making Spatial Plots
+
+Plots in the `sf` package are straightforward. You can simply call `plot()` on the geometry.
+
+```{r basic-plot}
+# Basic geometry plot
+plot(st_geometry(nyc_ct_shapes))
+```
+
+This can be annotated with colors. The following code chooses colors randomly for each tract.
+
+```{r colored-plot}
+plot(st_geometry(nyc_ct_shapes), col = sf.colors(12, categorical = TRUE), border = 'grey', axes = TRUE)
+```
+
+Notice that we can also use `ggplot()` and `geom_sf()`, which often produces cleaner graphics.
+
+```{r ggplot-map}
+ggplot() + 
+  geom_sf(data = nyc_ct_shapes) +
+  theme_minimal()
+```
+
+We can also plot specific variables contained within the shapefile attributes.
+
+```{r variable-plot}
+plot(nyc_ct_shapes['BoroName'])
+```
+
+## 3. Filtering by Borough
+
+To make our analysis simpler and our maps faster to render, let's only focus on Manhattan.
+
+```{r filter-manhattan}
+manhattan_ct_shapes <- nyc_ct_shapes %>% filter(BoroName == "Manhattan")
+```
+
+# US Census API Integration
+
+Now let's bring in the US Census API for data from the American Community Survey (ACS). 
+First, ensure you have your API key initialized in your RStudio environment using `Sys.setenv(CENSUS_KEY="your_key")`.
+
+## List of Census Data Endpoints
+
+We can see a full list of the data sources offered with the following command:
+
+```{r list-apis, eval=FALSE}
+apis <- listCensusApis()
+```
+
+Looking at this list, the endpoints which contain block- and tract-level data are the **Planning Database** datasets. These look like `pdb/~`.
+
+## Fetching Demographic Variables
+
+For our purposes, we'll want extremely detailed data at the level of census tracts. We will request the `PUB_ASST_INC_ACS_14_18` variable (Public Assistance Income) for tracts in Manhattan (State 36, County 061).
+
+```{r fetch-census-data}
+# Pulling the variable for Public Assistance Income
+pdb_pub_ast <- getCensus(
+    name = "pdb/tract",
+    vintage = 2020, 
+    vars = c("PUB_ASST_INC_ACS_14_18", "Tract"),
+    region = "tract:*",
+    regionin = "state:36+county:061"
+)
+
+# Preview the data
+head(pdb_pub_ast)
+```
+
+## Joining Data to Shapefiles
+
+Now we join our retrieved Census demographic data to our Manhattan spatial boundaries using the Tract ID.
+
+```{r join-data}
+# Join the spatial dataframe with the census data
+manhattan_pub_ast_shapes <- left_join(manhattan_ct_shapes, pdb_pub_ast, by = join_by(CT2020 == Tract))
+```
+
+Now we can plot the public assistance income data across the tracts in Manhattan!
+
+```{r plot-demographics}
+ggplot() + 
+  geom_sf(data = manhattan_pub_ast_shapes, aes(fill = PUB_ASST_INC_ACS_14_18)) +
+  scale_fill_viridis_c(na.value = "grey80") +
+  theme_minimal() +
+  labs(title = "Public Assistance Income in Manhattan", fill = "Assistance Level")
+```
+
+## Handling Missing Data
+
+Sometimes census tracts won't have matching data (e.g. parks, airports, or unpopulated areas). We can find which tracts are missing using `setdiff`.
+
+```{r check-missing}
+unique_tracts_ct2020 <- unique(manhattan_ct_shapes$CT2020)
+unique_tracts_tract <- unique(pdb_pub_ast$Tract)
+
+# Find the difference - tracts in the shapefile but missing from Census data
+missing_tracts <- setdiff(unique_tracts_ct2020, unique_tracts_tract)
+
+# Display the missing tracts
+print(missing_tracts)
+```

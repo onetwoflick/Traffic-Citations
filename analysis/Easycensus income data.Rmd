@@ -1,0 +1,171 @@
+---
+title: "Easycensus Income Data and Interactive Maps"
+output: html_document
+date: "2024-01-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+
+This notebook demonstrates how to pull demographic income data using the `easycensus` package, join it to the New York spatial bounds, and visualize the data interactively using `leaflet`.
+
+## 1. Setup and Libraries
+
+```{r load-libraries}
+library(tidyverse)
+library(sf)
+library(xml2)
+library(censusapi)
+library(easycensus)
+library(infer)
+library(leaflet)
+
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+## 2. Prepare Base Spatial Data
+
+First, we load the New York shapefiles and filter them down to Manhattan. Then, we calculate the number of citations per census tract based on our previously geocoded results.
+
+```{r load-spatial}
+# Read the NY Tracts shapefile
+ny_ct_shapes <- st_read("../data/raw/ny_2010_t_bound.shp")
+
+# Read combined geocoded results
+df <- read.csv("../data/processed/Combined_Geocode_Results.csv")
+
+# Filter and parse coordinates
+geocoded_aggregate_df <- df %>% 
+  filter(grepl(",", X_Y)) %>%  
+  separate_wider_delim(X_Y, delim = ",", names = c("latitude", "longitude"))
+
+# Convert to spatial object
+df_spatial_coords_df <- st_as_sf(geocoded_aggregate_df, 
+                                 coords = c("latitude", "longitude"), 
+                                 crs = 4269, 
+                                 agr = "constant")
+
+# Filter base map to Manhattan
+manhattan_ct_shapes <- ny_ct_shapes %>% filter(COUNTYFP == "061")
+
+# Transform coordinates
+df_spatial_coords_df <- st_transform(df_spatial_coords_df, crs = st_crs(manhattan_ct_shapes))
+
+# Calculate citation counts
+inter <- st_intersects(manhattan_ct_shapes, df_spatial_coords_df)
+manhattan_ct_shapes$count <- lengths(inter)
+
+# Plot simple heatmap of citations
+ggplot(manhattan_ct_shapes) + 
+  geom_sf(aes(fill = count)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Citation Count Heatmap")
+```
+
+## 3. Pulling Data with Easycensus
+
+The `easycensus` package simplifies fetching ACS data. Let's pull median household income quintiles.
+
+```{r easycensus-pull}
+# Find variable keys
+# cens_find_acs("income")
+
+# Fetch data for B19081 (Income Quintiles) in New York County (Manhattan)
+acs_income <- cens_get_acs("B19081", county = "New York", state = "NY", geography = "tract")
+
+# Filter for the 3rd (middle) quintile
+acs_income <- acs_income %>% filter(mnhiq_sub == "third quintile")
+
+# Join income data to our shapefile
+manhattan_income_shapes <- left_join(manhattan_ct_shapes, acs_income, by = join_by(GEOID == GEOID)) %>% 
+  mutate(estimate = as.numeric(estimate))
+```
+
+### Income Distribution
+
+Incomes are often right-skewed. Let's look at the distribution of our pulled estimates.
+
+```{r plot-histogram}
+manhattan_income_shapes %>%  
+  ggplot(aes(x = estimate)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 30) +
+  theme_minimal() +
+  labs(title = "Distribution of 3rd Quintile Incomes", x = "Income Estimate", y = "Count")
+```
+
+### Static Overlay Map
+
+We can plot a static map showing the income gradient overlaid with the citation coordinates (in red).
+
+```{r static-overlay}
+ggplot() +
+  geom_sf(data = manhattan_income_shapes, aes(fill = estimate)) +
+  geom_sf(data = df_spatial_coords_df, color = "red", size = 0.15, alpha = 0.5) +
+  coord_sf(xlim = c(-73.93, -73.99), ylim = c(40.8, 40.84), expand = FALSE) +
+  scale_fill_viridis_c(option = "magma") +
+  theme_minimal() +
+  labs(title = "Traffic Citations and Annual Income, Upper Manhattan", fill = "Average Annual Income")
+```
+
+## 4. Interactive Maps with Leaflet
+
+Leaflet allows us to create beautiful, interactive maps. Note that Leaflet requires the spatial data to be in the `WGS84` (EPSG:4326) coordinate reference system.
+
+```{r prep-leaflet}
+# Transform to EPSG:4326
+manhattan_income_shapes <- st_transform(manhattan_income_shapes, 4326)
+```
+
+### Building the Base Interactive Map
+
+```{r build-leaflet}
+# Create the base map with income polygons
+income_map <- leaflet(manhattan_income_shapes) %>% 
+  addTiles() %>% 
+  addPolygons(
+    color = "#444444", 
+    weight = 1, 
+    smoothFactor = 0.5,
+    opacity = 1.0, 
+    fillOpacity = 0.5,
+    fillColor = ~colorQuantile("YlOrRd", estimate)(estimate),
+    highlightOptions = highlightOptions(
+      color = "red", 
+      weight = 2,
+      bringToFront = TRUE
+    )
+  )
+
+# View map
+# income_map
+```
+
+### Subsampling Citations for Performance
+
+Plotting all ~200,000 citations will crash the browser. We will subsample 100 citations to visualize them as markers on the map.
+
+```{r leaflet-markers}
+# Transform citations to WGS84
+df_spatial_coords_df <- st_transform(df_spatial_coords_df, 4326)
+
+# Sample 100 random citations
+subsampled_citations <- rep_sample_n(df_spatial_coords_df, 100, reps = 1, replace = FALSE) %>% 
+  mutate(
+    lon = sf::st_coordinates(geometry)[, 1], 
+    lat = sf::st_coordinates(geometry)[, 2]
+  )
+
+# Add markers to map
+income_citations_map <- income_map %>% 
+  addMarkers(
+    data = subsampled_citations, 
+    popup = ~ReturnAddress
+  )
+
+# Display final interactive map
+income_citations_map
+```

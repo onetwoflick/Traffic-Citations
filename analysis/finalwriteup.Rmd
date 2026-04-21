@@ -1,0 +1,167 @@
+---
+title: "Educational Attainment by Race and Poverty Levels"
+author: "Bruktawit Abebe and Karla Zamora Guzman"
+output: html_document
+date: "2023-11-21"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+
+```{r setup, include=FALSE}
+# Setup chunk for global options
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# Load libraries
+library(tidyverse)
+library(sf)
+library(censusapi)
+
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+### Data Overview
+
+The variables used for this project were taken from the American
+Community Survey (ACS), which is an annual survey that allows communities to plan their investments and services accordingly. There
+are multiple topics covered by the ACS including racial, social, and
+economic characteristics of the sampled population. These populations
+are divided by age, sex, race, and Hispanic origin (U.S. Census, 2023).
+
+
+### Topic and Comparison of Variables   
+
+In the United States, women are more susceptible than men to experience living in poverty. More so, women of different races are impacted disproportionately, even taking into account the educational level they have achieved. In a report released by the Institute for Women’s Policy Research, it’s stated that Black women are more likely than White, Hispanic, and Asian women to experience poverty (Poverty and Opportunity, 2023).
+
+Our project highlights whether the attainment of a high school diploma influences the amount of women living below the poverty level. The variables picked are centered around New York City due to the city's large population. This allowed us to have more data to work with. The women are categorized by race and age as follows:
+
+- White women (25-34 years) 
+- Hispanic women (25-34 years) 
+- African American women (25-34 years) 
+- Asian women (25-34 years)
+
+The poverty variable, `B17101_002E`, represents the estimated total income
+in the last 12 months below the poverty line. This variable was plotted
+in comparison to each of the variables listed above. 
+
+
+### Scatter Plots
+
+Using the chosen variables and one standard poverty variable, scatter plots were created to better understand the relationship between them in regards to educational attainment. 
+
+```{r function-def, include=FALSE}
+# Helper function to plot ACS data
+mk_scatter_plot_acs <- function(var_1, var_2, year_var=2021, y_label=var_1, x_label=var_2, graph_title = "") {
+  new_puma_data <- getCensus(
+    name = "acs/acs1",
+    vintage = year_var,
+    vars = c(var_1, var_2),
+    region = "public use microdata area:*",
+    regionin = "state:36"
+  )
+
+  # Fit linear model
+  fit <- lm(reformulate(var_1, response = var_2), data = new_puma_data)
+
+  # Extract coefficients
+  coef_intercept <- round(coef(fit)[1], digits = 2)
+  coef_slope <- round(coef(fit)[2], digits = 2)  
+  
+  scatter_plot <- new_puma_data %>% 
+    ggplot(aes(x = .data[[var_1]], y = .data[[var_2]])) +
+    geom_point(alpha = 0.6) + 
+    geom_smooth(method = "lm", se = FALSE, color = "red") + 
+    annotate(
+      "text", x = Inf, y = Inf,
+      label = paste("Intercept =", coef_intercept, "\nSlope =", coef_slope),
+      hjust = 1, vjust = 2, size = 4, color = "black"
+    ) + 
+    theme_minimal() +
+    labs(y = y_label, x = x_label, title = graph_title)
+
+  return(scatter_plot)
+}
+```
+
+#### 1. Standard Poverty vs. White women (25-34 years)
+
+```{r scatter-1}
+mk_scatter_plot_acs("B17101_002E", "B15002A_014E", graph_title = "White Women with HS Diploma", x_label = "Standard Poverty", y_label = "White Women")
+```
+
+The scatterplot shows a negative relation in which one variable increases as the other decreases. Therefore, for every increase of 100 white women who receive a high school diploma, the number of people living below the poverty line decreases, on average, by 11.  
+
+#### 2. Standard Poverty vs. Hispanic Women (25-34 years)
+
+```{r scatter-2}
+mk_scatter_plot_acs("B17101_002E", "B15002I_014E", graph_title = "Hispanic Women with HS Diploma", x_label = "Standard Poverty", y_label = "Hispanic Women")
+```
+
+The scatter plot shows that when compared to poverty levels, Hispanic women see themselves in similar situations to that of black women. In the graph above, for every increase of 100 Hispanic women that acquire a high school diploma, the number of people living below the poverty line also increases by 80.  
+
+#### 3. Standard Poverty vs. Black Women (25-34 years)
+
+```{r scatter-3}
+mk_scatter_plot_acs("B17101_002E", "B15002B_014E", graph_title = "Black Women with HS Diploma", x_label = "Standard Poverty", y_label = "Black Women")
+```
+
+The scatter plot above depicts the poverty levels for black women who have received a highschool diploma. As demonstrated, there is a positive relationship between both variables. Hence, for every 100 black women who receive a high school diploma, the number of people living below the poverty line increases by 80. In comparison to the previous graph, black women are more likely than their white counterparts to face living below the poverty line.
+
+#### 4. Standard Poverty vs. Asian Women (25-34 years)
+
+```{r scatter-4}
+mk_scatter_plot_acs("B17101_002E", "B15002D_014E", graph_title = "Asian Women with HS Diploma", x_label = "Standard Poverty", y_label = "Asian Women")
+```
+
+When the standard poverty rate was compared to the number of Asian women with a highschool diploma, the plot demonstrates that for every increase of 100 Asian women with a diploma, the number of people living below the poverty line increases by 50. 
+
+**Summary:** 
+As shown in the four scatter plots above, White women are the least likely to experience poverty after the attainment of a high school degree. Surprisingly, the rate for both Asian and Hispanic women are the same while Black women are the most likely to experience living in poverty, even with a high school diploma. 
+
+
+### Heat Maps: New York City vs. Rockland County
+
+We did not provide heat maps for every race we touched upon in our research due to very limited information throughout the state of New York. 
+
+```{r heat-map-setup, include=FALSE}
+# Read PUMA shapefiles
+# Note: Ensure tl_2022_36_puma20.shp is located in the data/raw folder
+# ny_puma_shapes <- st_read("../data/raw/tl_2022_36_puma20.shp")
+
+plot_county_acs <- function(var_name, legend_title = "White Women (24-35) with a High School Diploma: Below the Poverty Line", s_file=ny_puma_shapes) {
+  # Getting tract data
+  puma_data <- getCensus(
+    name = "acs/acs1",
+    vintage = 2021,
+    vars = c(var_name),
+    region = "public use microdata area:*",
+    regionin = "state:36"
+  )
+
+  var_joined_table <- s_file %>%
+    left_join(puma_data, by = c("PUMACE20" = "public_use_microdata_area"))
+ 
+  # Plotting the graph
+  var_plot <- ggplot() +
+    geom_sf(data = var_joined_table, aes_string(fill = var_name)) +
+    labs(fill = legend_title) + 
+    scale_fill_viridis_c() +
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust=1))
+ 
+  return(var_plot) 
+}
+```
+
+```{r plot-heatmap, eval=FALSE}
+plot_county_acs("B17101_002E", "High School Diploma", s_file = ny_puma_shapes)
+```
+
+The heat map shows white women with high school diplomas in relation to their level of poverty and how that part of the population is spread out throughout New York City. The map legend on the right interprets the concentrations and where they reside in the city in combination with the colors on the map. The gray areas indicate parts of the city that don't have the variable we are working with.    
+
+# References
+
+1. Bureau, U. C. (2023). Retrieved from https://www.census.gov/data/developers/data-sets/acs-5year.html 
+2. Poverty and opportunity full section. (2015, November 20). https://statusofwomendata.org/explore-the-data/poverty-opportunity/poverty-and-opportunity-full-section/#:~:text=Native%20American%20women%20have%20the,Hispanic%20(24.0%20percent)%20women. 
+3. Rockland County, NY: Profile Data. (N.d.). Retrieved from https://censusreporter.org/profiles/05000US36087-rockland-county-ny/ 

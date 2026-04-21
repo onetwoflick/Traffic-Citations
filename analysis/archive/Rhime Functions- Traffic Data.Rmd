@@ -1,0 +1,277 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-01-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+#install.packages("mapsapi")
+install.packages("tidyverse")
+install.packages("httr2")
+```
+
+
+```{r}
+#library(mapsapi)
+#library(leaflet)
+library(xml2)
+library(sf)
+library(tidyverse)
+```
+
+
+
+
+
+```{r}
+key ="your_api_key_here"
+```
+```{r}
+doc = mp_geocode(
+  addresses = "Manhattan",
+  key = key,
+  quiet = TRUE
+)
+#doc = list("Manhattan" = as_xml_document(response_geocode))
+pnt = mp_get_points(doc)
+pnt
+leaflet() %>% 
+  addProviderTiles("CartoDB.DarkMatter") %>%
+  addCircleMarkers(data = pnt)
+```
+```{r}
+#nyc_cb_map <- st_read("../data/raw/nycb2020wi.shp")
+ny_ct_shapes<- st_read("../data/raw/ny_2010_t_bound.shp")
+```
+
+
+```{r}
+ggplot() + geom_sf(data =nyc_cb_map )
+
+```
+
+
+```{r}
+#df_spatial_coords_1 <- st_transform(df_spatial_coords_1, crs =st_crs(nyc_cb_map))
+```
+```{r}
+#ggplot() + geom_sf(data =nyc_cb_map ) +geom_sf(data =df_spatial_coords_1, pch =4 , color ="red", cex = 0.5)
+
+```
+```{r}
+library(httr2)
+
+census_geocoder <- function(address, benchmark = "_Census2020", returntype = "locations") {
+  
+  
+  base_url <- "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+
+  query_list <- list(address = address, benchmark = benchmark, returntype = returntype)
+ 
+  response <- GET(url = base_url, query = query_list)
+
+  if (response$status_code == 200) {
+    
+    return(content(response, "parsed"))
+  } else {
+    stop("Failed with Status Code ", response$status_code)
+  }
+}
+```
+```{r}
+url <- "https://geocoding.geo.census.gov/geocoder/locations/addressbatch"
+
+parking_csv <- "../data/raw/Parking_Fiscal_Year_2021.csv"
+df = read.csv(parking_csv) 
+#a = df[, c(24 , 25)] 
+df$street_address<- paste(df[,24], df[,25], sep = " ")
+
+
+result_df <- df %>% select(concatenated_column)
+#a = df[, c(1, 24 , 25)] 
+#print(df$home_address)
+```
+
+```{r}
+####################################################
+# Read the CSV file
+parking_csv <- "../data/raw/Parking_Fiscal_Year_2021.csv"
+df <- read.csv(parking_csv)
+df$street_address <- paste(df[, 24], df[, 25], sep = " ")
+
+# Define the number of rows in each chunk
+chunk_size <- 10000
+
+# URL for the API
+url <- "https://geocoding.geo.census.gov/geocoder/locations/addressbatch"
+
+# Initialize the last row processed
+last_row_processed <- 0
+
+while (last_row_processed < nrow(df)) {
+  # Calculate the start and end rows for the current chunk
+  start_row <- last_row_processed + 1
+  end_row <- min(last_row_processed + chunk_size, nrow(df))
+
+  # Extract the chunk
+  chunk <- df[start_row:end_row, ]
+
+  # Create the new DataFrame
+  new_df <- data.frame(
+    Column1 = chunk[, 1],
+    StreetAddress = chunk$street_address,
+    NullColumn1 = 'New York',
+    State = 'New York',
+    NullColumn2 = "",
+    stringsAsFactors = FALSE
+  )
+
+  
+  chunk_index <- (last_row_processed / chunk_size) + 1
+  chunk_file_name <- paste0("Modified_Parking_Data_Chunk_", chunk_index, ".csv")
+  response_file_name <- paste0("../data/processed/Geocode_Result_Chunk_", chunk_index, ".csv")
+
+ 
+  write.table(new_df, chunk_file_name, row.names = FALSE, col.names = FALSE, sep = ",")
+
+  # create the request
+  request <- request(url)  %>% 
+    req_body_multipart(
+      addressFile = curl::form_file(chunk_file_name),
+      benchmark = "Public_AR_Current"
+    )
+
+  resp <- req_perform(request)
+
+  # Check if the request was successful
+  if (resp$status_code == 200) {
+    message("File ", chunk_file_name, " sent successfully.")
+
+    # Get the response body as raw data
+    response_content <- resp_body_raw(resp)
+
+    # Write the raw response content to a CSV file
+    writeBin(response_content, response_file_name)
+
+    message("Response saved as ", response_file_name, ".")
+  } else {
+    message("Failed to send file ", chunk_file_name, ". Status code: ", resp$status_code)
+  }
+
+  # Delete the chunk CSV file
+  file.remove(chunk_file_name)
+
+  # Update the last row processed
+  last_row_processed <- end_row
+}
+
+```
+
+```{r}
+parking_csv <- "../data/raw/Parking_Fiscal_Year_2021.csv"
+df <- read.csv(parking_csv)
+df$street_address <- paste(df[, 24], df[, 25], sep = " ")
+```
+```{r}
+#manhattan_cb_map <- nyc_cb_map %>% filter(BoroName=="Manhattan")
+manhattan_ct_shapes <- ny_ct_shapes %>% filter(COUNTYFP=="061")
+```
+
+```{r}
+df = read.csv("../data/processed/Geocode_Result_Chunk_1.csv")
+```
+```{r}
+geocoded_aggregate_1 <- df %>% filter(grepl(",",`X.74.01014741769063.40.732667415400556`)) %>%  separate_wider_delim(`X.74.01014741769063.40.732667415400556`,delim = ",", names = c("latitude", "longitude"))
+```
+```{r}
+df_spatial_coords_1 <- st_as_sf(geocoded_aggregate_1, coords =c("latitude", "longitude"), crs = 4269, agr = "constant")
+```
+```{r}
+inter <-st_intersects(manhattan_cb_map,df_spatial_coords_1)
+```
+```{r}
+manhattan_cb_map$count <- lengths(inter)
+```
+```{r}
+ggplot(manhattan_cb_map)+ geom_sf(aes(fill=count))
+```
+
+
+
+
+
+
+```{r}
+result <- census_geocoder(address = "125 NY-340, Sparkill, NY 10976")
+#print(result)
+ 
+x_coordinate <- result$result$addressMatches[[1]]$coordinates$x
+y_coordinate <- result$result$addressMatches[[1]]$coordinates$y
+```
+
+
+```{r}
+print(sprintf("X Coordinate (Longitude): %f", x_coordinate))
+print(sprintf("Y Coordinate (Latitude): %f", y_coordinate))
+```
+```{r}
+df <- read.csv("../data/processed/Geocode_Result_Chunk_2.csv")
+```
+
+```{r}
+############################################################DONOT RUN NOMORE
+# Read the first CSV file and set the column names
+df <- read.csv("../data/processed/Geocode_Result_Chunk_1.csv")
+names(df) <- c("UniqueID", "Address", "Matched", "Exactmatch", "ReturnAddress", "X_Y", "RandomID", "RValue")
+
+# Loop through the remaining CSV files and row-bind them to the initial DataFrame
+for(i in 2:19) {
+  # Generate the file name based on the pattern
+  file_name <- paste("../data/processed/Geocode_Result_Chunk_", i, ".csv", sep = "")
+  # Read the current CSV file
+  temp_df <- read.csv(file_name)
+  # Set the column names to the temp_df
+  names(temp_df) <- c("UniqueID", "Address", "Matched", "Exactmatch", "ReturnAddress", "X_Y", "RandomID", "RValue")
+  # Row-bind the current DataFrame with the existing DataFrame
+  df <- rbind(df, temp_df)
+}
+
+# Optionally, export the combined DataFrame to a new CSV file
+write.csv(df, "../data/processed/Combined_Geocode_Results.csv", row.names = FALSE)
+
+
+```
+```{r}
+df <- read.csv("../data/processed/Combined_Geocode_Results.csv")
+```
+```{r}
+geocoded_aggregate_df <- df %>% filter(grepl(",",`X_Y`)) %>%  separate_wider_delim(`X_Y`,delim = ",", names = c("latitude", "longitude"))
+```
+```{r}
+df_spatial_coords_df <- st_as_sf(geocoded_aggregate_df, coords =c("latitude", "longitude"), crs = 4269, agr = "constant")
+```
+```{r}
+df_spatial_coords_df <- st_transform(df_spatial_coords_df, crs =st_crs(manhattan_ct_shapes))
+```
+
+```{r}
+inter <-st_intersects(manhattan_ct_shapes,df_spatial_coords_df)
+```
+```{r}
+manhattan_ct_shapes$count <- lengths(inter)
+```
+```{r}
+ggplot(manhattan_ct_shapes)+ geom_sf(aes(fill=count))
+```
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

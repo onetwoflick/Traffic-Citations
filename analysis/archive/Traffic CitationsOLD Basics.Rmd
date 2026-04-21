@@ -1,0 +1,112 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-01-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE, warning = FALSE)
+```
+
+```{r}
+if(!require(tidyverse)){
+    install.packages("tidyverse")
+    library(tidyverse)
+}
+if(!require(sf)){
+    install.packages("sf")
+    library(sf)
+}
+if(!require(censusapi)){
+    install.packages("censusapi")
+    library(censusapi)
+}
+if(!require(httr2)){
+    install.packages("httr2")
+    library(httr2)
+}
+```
+
+
+```{r}
+manhattan_ct_shapes<- read_rds("../data/processed/ManhattanTrafficCounts.rds")
+```
+
+```{r}
+# Plot a heat map
+ggplot(manhattan_ct_shapes)+ geom_sf(aes(fill=count))
+```
+
+
+```{r}
+#Load in the API
+Sys.setenv(CENSUS_KEY="your_api_key_here")
+
+Sys.getenv("CENSUS_KEY")
+```
+```{r}
+# List of other variables you can  compare to Traffic Citation in Manhattan
+pdb_variables <- listCensusMetadata(name = "pdb/tract", type = "variables", vintage=2020)
+```
+```{r}
+#You can replace the value inside vars with any variable from the pdb variable list, just copy and paste this code block if you want to do this for different variables 
+pdb_pub_ast <- getCensus(
+    name = "pdb/tract",
+    vintage = 2020, 
+    vars = c("PUB_ASST_INC_ACS_14_18"),
+    region = "tract:*",
+    regionin = "state:36+county:061" # 36 is NY and 061 is New York County
+    )
+```
+
+```{r}
+manhattan_pub_ast_shapes <- left_join(manhattan_ct_shapes,pdb_pub_ast, by=join_by(TRACTCE==tract))
+```
+
+```{r}
+#Plotting a heatmap for a variable in pdb_variables, you can replace the value for fill= with the same variable that you replaced in vars 
+ggplot()+geom_sf(data = manhattan_pub_ast_shapes, aes(fill=PUB_ASST_INC_ACS_14_18))
+```
+```{r}
+#Creating the scatterplot and regression line comparing  a variable from pdb_variable to count(number of traffic citation in a tract), replace the x= value with the variables that you want to compare traffic citations with.
+manhattan_pub_ast_shapes %>% ggplot(aes(x = PUB_ASST_INC_ACS_14_18, y = count)) + geom_point() +
+  geom_smooth(method="lm", se=FALSE)
+```
+
+```{r}
+#Finding the slope, replace x with your variable/same as above codechunk
+
+#lm(count ~ x, data =manhattan_pub_ast_shapes)
+```
+```{r}
+#Find the correlation coefficient, replace x with your variable
+#cor(x,count)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+mk_scatter_plot_pdb <- function(var_1 ,year_var=2020,y_label=var_1,x_label="Traffic Citation Count",graph_title = "",s_file=manhattan_ct_shapes) {
+  var_2= s_file$count
+  new_tract_data <- getCensus(
+    name = "pdb/tract",
+    vintage = year_var,
+    vars = c(var_1),
+    region = "tract:*",
+    regionin = "state:36+county:061"
+  )
+  var_joined_table <- left_join(s_file,new_tract_data, by=join_by(TRACTCE==tract))
+  
+  # Fit linear model
+  fit <- lm(reformulate(var_1, response = 'count'), data = var_joined_table)
+
+  # Extract coefficients
+  coef_intercept <- round(coef(fit)[1], digits = 2)
+  coef_slope <- round(coef(fit)[2], digits = 2)  
+  scatter_plot <- var_joined_table %>% ggplot(aes(x = .data[[var_1]], y = count)) + geom_point() + geom_smooth(method = "lm", se = FALSE)+ annotate("text", x = Inf, y = Inf, label = paste("Intercept =", coef_intercept, "\nSlope =", coef_slope), hjust = 1, vjust = 2, size = 4, color = "black")+ labs(y= y_label, x = x_label,title = graph_title)
+
+  return(scatter_plot)
+}
+#
+```
+```{r}
+mk_scatter_plot_pdb("PUB_ASST_INC_ACS_14_18")
+```
+

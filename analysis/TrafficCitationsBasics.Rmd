@@ -1,0 +1,159 @@
+---
+title: "Traffic Citations Basics"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-01-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning = FALSE, results = 'hide')
+```
+
+# Introduction
+
+This analysis compares the spatial distribution of traffic citations in Manhattan with census demographic variables, specifically focusing on English proficiency and household income.
+
+## 1. Environment Setup
+
+```{r load-libraries}
+library(tidyverse)
+library(sf)
+library(censusapi)
+library(easycensus)
+library(moderndive)
+
+# Ensure Census API Key is set
+# Sys.setenv(CENSUS_KEY="your_api_key_here")
+```
+
+## 2. Load Preprocessed Data
+
+We load our pre-calculated RDS files containing citation counts per Manhattan census tract, along with a subsampled set of citation coordinates.
+
+```{r load-data}
+manhattan_ct_shapes <- read_rds("../data/processed/ManhattanTrafficCounts.rds")
+df_spatial_coords_subsample <- read_rds("../data/processed/df_spatial_coords_subsample.rds")
+
+# Plot a basic heat map
+ggplot(manhattan_ct_shapes) + 
+  geom_sf(aes(fill = count)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Citation Heatmap")
+```
+
+---
+
+# Analysis 1: English Proficiency
+
+We use the Census Planning Database (`pdb/tract`) to retrieve the number of individuals who speak only English.
+
+```{r get-english-data}
+pdb_pub_ast <- getCensus(
+    name = "pdb/tract",
+    vintage = 2020, 
+    vars = c("Age5p_Only_English_ACS_14_18"),
+    region = "tract:*",
+    regionin = "state:36+county:061" # 36 is NY, 061 is Manhattan
+)
+
+# Join with spatial data
+manhattan_pub_ast_shapes <- left_join(manhattan_ct_shapes, pdb_pub_ast, by = join_by(TRACTCE == tract))
+```
+
+### Heatmap: English Level
+
+```{r plot-english}
+ggplot() + 
+  geom_sf(data = manhattan_pub_ast_shapes, aes(fill = Age5p_Only_English_ACS_14_18)) +
+  scale_fill_viridis_c(option = "cividis") +
+  theme_minimal() +
+  labs(title = "English Level in Manhattan Tracts", fill = "English Speakers")
+```
+
+### Scatter Plot & Regression
+
+We compare the number of English speakers with the number of traffic citations given in an area.
+
+```{r english-scatter, results='show'}
+manhattan_pub_ast_shapes %>% 
+  ggplot(aes(x = Age5p_Only_English_ACS_14_18, y = count)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal() +
+  labs(x = "Number of English Speakers", y = "Citation Count")
+
+# Find the slope
+lm(count ~ Age5p_Only_English_ACS_14_18, data = manhattan_pub_ast_shapes) %>% 
+  get_regression_table()
+
+# Correlation coefficient
+manhattan_pub_ast_shapes %>% 
+  summarize(Correlation = cor(Age5p_Only_English_ACS_14_18, count, use = "complete.obs"))
+```
+
+**Interpretation:**
+The ascending regression line shows that as the number of persons who speak English increases, the number of citations given in the area also increases. 
+
+Based on the regression line, when the number of persons speaking English is zero, the baseline citation estimate is 390.22. For every 1000 people, approximately 42 people speak English well. When the number of people who speak English in an area goes up by one, the citation count changes on average by 0.042.
+
+---
+
+# Analysis 2: Income Quintiles
+
+We use the `easycensus` package to retrieve income data, specifically the 3rd quintile for household income.
+
+```{r get-income-data}
+# cens_find_acs("income") # Used to find variables
+
+# Get 3rd quintile income data
+acs_income <- cens_get_acs("B19081", county = "New York", state = "NY", geography = "tract")
+
+# Clean and join the data
+manhattan_income_shapes <- left_join(manhattan_ct_shapes, acs_income, by = join_by(GEOID == GEOID)) %>% 
+  mutate(estimate = as.numeric(estimate)) %>% 
+  mutate(estimate = log10(estimate)) %>% 
+  mutate(estimate = ifelse(estimate < 0, 0, estimate)) %>%  
+  filter(mnhiq_sub == "third quintile") 
+```
+
+### Overlay Map: Incomes and Citations
+
+```{r plot-income-overlay}
+ggplot() +
+  geom_sf(data = manhattan_income_shapes, aes(fill = estimate)) +
+  geom_sf(data = df_spatial_coords_subsample, color = "red", size = 0.15, alpha = 0.5) +
+  coord_sf(xlim = c(-73.93, -73.99), ylim = c(40.8, 40.84), expand = FALSE) +
+  scale_fill_viridis_c(option = "magma") +
+  theme_minimal() +
+  labs(title = "Income Overlay with Subsampled Citations")
+```
+
+### Heatmap: Income Quintile Level
+
+```{r plot-income-heatmap}
+ggplot() + 
+  geom_sf(data = manhattan_income_shapes, aes(fill = estimate)) +
+  scale_fill_viridis_c(option = "magma") +
+  theme_minimal() +
+  labs(title = "Income Quintile Level in Manhattan", fill = "Log10 Income")
+```
+
+### Scatter Plot & Regression
+
+```{r income-scatter, results='show'}
+manhattan_income_shapes %>% 
+  ggplot(aes(x = estimate, y = count)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal() +
+  labs(x = "Log10 Income Estimate", y = "Citation Count")
+
+# Find the slope
+lm(count ~ estimate, data = manhattan_income_shapes) %>% 
+  get_regression_table()
+```
+
+**Interpretation:**
+The regression line indicates that higher income levels correlate with an increased number of citations in that tract. This stands in major contrast to our initial hypothesis.

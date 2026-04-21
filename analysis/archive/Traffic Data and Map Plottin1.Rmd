@@ -1,0 +1,94 @@
+---
+title: "Traffic Data and Map Plotting"
+output: html_document
+date: "2024-02-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+if(!require(tidyverse)){
+    install.packages("tidyverse")
+    library(tidyverse)
+}
+if(!require(sf)){
+    install.packages("sf")
+    library(sf)
+}
+if(!require(censusapi)){
+    install.packages("censusapi")
+    library(censusapi)
+}
+```
+Let's set up NY state shapefiles and plot them here in R. We'll plot them at several different levels of detail, depending on what the Census data gives.
+
+First we load in the shapefile for Census block groups.
+```{r}
+nyc_cb_shapes <- st_read("../data/raw/nycb2020wi.shp")
+```
+We can view this as a geodataframe.
+
+```{r}
+View(nyc_cb_shapes)
+```
+## Making Plots
+
+Plots in the `sf` package are straightforward.
+
+```{r pressure, echo=FALSE}
+plot(st_geometry(nyc_cb_shapes))
+```
+This can be annotated with colors. This code chooses the colors randomly.
+```{r}
+plot(st_geometry(nyc_cb_shapes), col = sf.colors(12, categorical = TRUE), border = 'grey', 
+     axes = TRUE)
+```
+Notice that we can use `ggplot()` as well.
+```{r}
+ggplot()+geom_sf(data = nyc_cb_shapes)
+```
+We can also plot specific variables.
+```{r}
+plot(nyc_cb_shapes['BoroName'])
+```
+To make our life simpler going forward, let's only focus on Manhattan.
+```{r}
+manhattan_cb_shapes <- nyc_cb_shapes %>% filter(BoroName=="Manhattan")
+```
+# US Census API
+Now let's bring in the US Census API for data from the American Community Survey. 
+
+First, let's initialize the API key in our RStudio environment. Anyone can get a key but you can use mine. We should make people get their own.
+
+```{r}
+Sys.setenv(CENSUS_KEY="your_api_key_here")
+
+Sys.getenv("CENSUS_KEY")
+```
+## List of Census Data Endpoints
+We can see a full list of the data sources offered with the following commmand:
+
+```{r}
+apis <- listCensusApis()
+```
+Looking at this list, the endpoints which contain block- and tract-level data are the Planning Database datasets. These look like `pdb/~` where the second parameter could be tract, block, etc.
+
+## State and County Codes
+
+We also need state and county codes. You can find them here, in the drop-down menu titled "County and County Equivalent Entities".
+
+https://www.census.gov/library/reference/code-lists/ansi.html
+
+Since this file is working with NY, its codes are in this text file:
+
+https://www2.census.gov/geo/docs/reference/codes2020/cou/st36_ny_cou2020.txt
+
+Now we can make API calls. We will almost exclusively use the PDB data, so the `name` and `vintage` parameters will stay the same.
+
+Eventually we'll want to select a whole list of variables. The full list of variables in the PDB is available, there almost 30,000 of them! You can see the all here. It will take a few seconds to pull down all the data.
+```{r}
+pdb_variables <- listCensusMetadata(name = "pdb/blockgroup", type = "variables", vintage=2020)
+```
+

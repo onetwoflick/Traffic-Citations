@@ -1,0 +1,146 @@
+---
+title: "Interpreting Regression Slope and Intercept"
+output:
+  pdf_document: default
+  html_document: default
+  df_print: kable
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+knitr::opts_chunk$set(fig.width=4, fig.height=3, fig.align = "center") 
+```
+
+# Introduction
+
+In today's class, we'll talk about regression lines and interpret their slope and intercept. We will use datasets to understand how variables relate to one another linearly.
+
+Run this code chunk to load the packages you'll need:
+
+```{r load-libraries}
+library(tidyverse)
+```
+
+## Warmup: Exploring the Cereal Dataset
+
+Today we'll use a new data set entitled `cereal`. Make sure `cereal.csv` is in your working directory or data folder.
+
+```{r load-data, eval=FALSE}
+# Example of loading the data
+cereal <- read.csv("../data/raw/cereal.csv")
+```
+
+What are the types of the variables in this data set? For convenience, we can always look at a list of the variables using `names()`.
+
+```{r explore-names, eval=FALSE}
+names(cereal)
+```
+
+Remember that you can always filter down to a smaller subset of the data before plotting:
+
+```{r cereal-plot, eval=FALSE}
+cereal %>% 
+  filter(mfr %in% c("G", "K")) %>% 
+  ggplot(aes(x = calories, y = sugars)) +
+  geom_point() +
+  theme_minimal()
+```
+
+---
+
+# Interpreting Slope
+
+Returning to the built-in `mtcars` dataset for a moment, we can look at how `qsec` (the time in seconds to race 0.25 miles) is related to `wt` (the weight in thousands of pounds). The following gives a scatterplot with a regression line.
+
+```{r mtcars-plot}
+mtcars %>% 
+  ggplot(aes(x = qsec, y = wt)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal()
+```
+
+We'll also want to know the formula for the regression line.
+
+```{r mtcars-lm}
+lm(wt ~ qsec, data = mtcars)
+```
+
+The equation for the regression line is `y = -0.09567x + 4.92479`.
+
+### What does this mean?
+
+What we want to do here is *interpret* the slope, meaning we want to understand its units. Any slope we see in this course will have *units* that indicate how we measure the variables.
+
+Notice that we measure `qsec` in seconds, and `wt` in thousands of pounds. To calculate the slope of a line, we evaluate the fraction $\frac{y_2 - y_1}{x_2 - x_1}$. Importantly, the $x$'s are on the bottom, and the $y$'s are on the top!
+
+The *units* of the slope are $\frac{\text{y-units}}{\text{x-units}}$. Since `qsec` is on the x-axis, and `wt` is on the y-axis, we get $\frac{\text{1000 pounds}}{\text{1 sec}}$. So the units of the slope are thousands of pounds per second, and if we multiply by the slope: `-0.09567 * 1000 = -95.67`. Whew!
+
+**Interpretation:** If the $x$ variable (the *explanatory* variable) increases by 1, then we estimate that the *response* variable changes by exactly the slope. So, for every additional 1000 pounds that the car weighs, we expect the quarter-mile time to **decrease** by 0.319 seconds.
+
+---
+
+# Interpreting Intercept
+
+Similarly, we can try to understand the y-intercept. Recall that this is `4.92479` from the `lm()` output.
+
+Remembering some more information from algebra, when $x$ is 0, $y$ is the y-intercept. This is the starting point for interpreting the intercept; we can plug what we know directly into this sentence. It would read that for a car which took 0 seconds to travel that distance, we would expect its weight to be `4.92479` in thousands of pounds (i.e. 4924.79 pounds).
+
+Of course, this doesn't make much sense (a car can't travel 1/4 mile in 0 seconds!), and we shouldn't expect intercepts to always have nice interpretations. However, it is important to know *how* to interpret them when they do make sense.
+
+---
+
+# On Your Own
+
+Here we'll start in on the data set for today. We'll explore two questions separately.
+
+## Part A: Relating Numerical Variables
+
+Our first question is the following: how much does sugar affect the calorie content in a cereal?
+
+1. Make a scatter plot which relates calories to the amount of sugar. Here calories should be the explanatory variable.
+    ```{r part-a1, eval=FALSE}
+    # YOUR CODE GOES HERE
+    ```
+
+2. What does a dot represent in this scatterplot?
+
+3. Find the equation of the regression line.
+    ```{r part-a3, eval=FALSE}
+    # YOUR CODE GOES HERE
+    ```
+
+4. What are the units of the slope? Interpret this slope.
+
+5. What is the y-intercept? How do you interpret this?
+
+6. Suppose that you buy a cereal which has 120 calories per serving. What argument would you make using this analysis to estimate how much sugar it contains per serving?
+
+7. Calculate the correlation coefficient for this scatterplot. How confident are you in this prediction for the amount of sugar?
+    ```{r part-a7, eval=FALSE}
+    # YOUR CODE GOES HERE
+    ```
+
+8. [A recent study](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8391470/) found that high-sugar diets in children significantly increased the chances of obesity. Suppose that you are a school nurse and you ask 200 children their weight and the number of times per week they have sugary cereal for breakfast. What do you expect this scatterplot to look like? What do you expect the correlation coefficient to be?
+
+9. Suppose that you are an advertising executive in charge of marketing for children's cereals. What argument would you make against the statistical finding in the previous question?
+
+## Part B: Relating Numerical and Categorical Variables
+
+Next, we'll ask a different question: do some manufacturers make overall healthier cereals than others?
+
+1. What variables will you consider to answer this question?
+
+2. Create a series of boxplots which help compare the variables you chose for different manufacturers.
+    ```{r part-b2, eval=FALSE}
+    # YOUR CODE GOES HERE
+    ```
+
+3. Use `group_by` to compare the medians across the categories.
+    ```{r part-b3, eval=FALSE}
+    # YOUR CODE GOES HERE
+    ```
+
+4. Choose a manufacturer (Kellogg, General Mills, Nabisco, or Post) and make an argument for why they are the manufacturer of the healthiest cereals using the summary statistics and charts we saw above.
